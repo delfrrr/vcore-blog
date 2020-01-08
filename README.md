@@ -33,7 +33,7 @@ Draft backlog for articles and who is working on them:
 **Stale states challenges:**
 
 * distributed transactions
-* command query separation
+* command query separation ( @DABBASS )
 * eventual consistency
 * unidirectional data flow
 * event sourcing
@@ -41,7 +41,7 @@ Draft backlog for articles and who is working on them:
 **Other:**
 
 * fun out 
-* avrò schemas magic byte
+* avrò schemas magic byte ( @DABBASS )
 * domain driven design
 * pub sub systems
 

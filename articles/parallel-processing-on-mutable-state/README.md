@@ -1,16 +1,16 @@
 # Parallel processing on mutable state
 
-## Why is important
+## Why everyone does parallel processing now?
 
-Despite the fact that Moore law still works, processor clock speed is not changing over last 15 years. When first mass multicore processors released prominent people like Herb Sutter [proclaimed](http://www.gotw.ca/publications/concurrency-ddj.htm) a fundamental turn toward concurrency in software development.
+Despite the Moore law (which still works) processor clock speed is not changing over last 15 years. When first mass multicore processors released prominent people [proclaimed](http://www.gotw.ca/publications/concurrency-ddj.htm) a  turn toward concurrency in software development.
 
 <img src="./cpu-perfomance.png" />
 
-Even though single thread performance did improved 10x (literally) since then, every modern software development team tries to tackle throughput and latency issues primarily by applying parallel processing.
+Single thread performance did improved (literally) 10x  since then. But every modern software development team now will use parallel processing as the main weapon against throughput and latency issues.
 
-This article is about common scenarios in service oriented software when parallel processing is does not brings performance gains to application.
+This article is about common scenarios in service oriented software when parallel processing does not brings performance gains to application.
 
-## The problems
+## The setting 
 
 Consider this naive architecture of Uber-like ( [ride-hailing](https://en.wikipedia.org/wiki/Peer-to-peer_ridesharing) ) application.
 
@@ -20,11 +20,13 @@ Consider this naive architecture of Uber-like ( [ride-hailing](https://en.wikipe
 * Passenger app allows to create and cancel booking. 
 * Driver app allows driver to accept and complete bookings.
 
+## The goal
+
 Our goal is to implement following business requirements:
 * bookings can be `cancelled` after it was `accepted`
 * bookings cannot be `accepted` after it was `cancelled`
 
-### Naive solution
+## Naive solution
 
 Driver app checks if booking state is `created` and then sends accepts it: 
 * GET request to receive booking state
@@ -34,9 +36,9 @@ Immediate problem is: what happens if Passenger App sent cancel request between 
 
 The problem which occurs can be classified as as `read-modify-write` race condition. For many engineers, due to [Birthday Paradox](https://en.wikipedia.org/wiki/Birthday_problem) it can none intuitive how often this race condition will actually happen.
 
-### Improving naive solution
+## Evolution of naive solution
 
-The obvious way to fix the app would be validating previous state inside Booking Service. Let's consider following stereotypical architecture for booking service:
+The next obvious evolution of the app would be validating previous state inside Booking Service. Let's consider following stereotypical architecture for booking service:
 
 <img src="./booking-service.png" />
 
@@ -47,12 +49,58 @@ Now let's move our booking state validation from Driver App to booking service. 
 * booking service query database for current state
 * if booking state is still `created`, update it
 
-## The solution
+However, when in a same time cancellation request will hit another instance of Booking Service, we will end-up with the same `read-modify-write` race condition.
 
-## Links
+The following solution evolution will depend on database application is using. In case of PostgreSQL the it may look like this:
+* wrap queries with transaction: won't work because PostgreSQL default transaction is [Read Committed](https://www.postgresql.org/docs/current/transaction-iso.html#XACT-READ-COMMITTED)
 
-https://www.karlrupp.net/2018/02/42-years-of-microprocessor-trend-data/
+> note that two successive SELECT commands can see different data, even though they are within a single transaction, if other transactions commit changes after the first SELECT starts and before the second SELECT starts.
 
-http://henrikeichenhardt.blogspot.com/2013/06/why-shared-mutable-state-is-root-of-all.html
+## Root of all evil
 
-https://en.wikipedia.org/wiki/Amdahl%27s_law
+All the solution iterations here fall into the same pattern: parallel processing on a mutable state.
+
+They iterations may move problem down the stack:
+* from frontend to backend instances
+* from backend instances to database threads
+
+But they don't solve fundamental problems, which can be best described with this pseudo-equation:
+
+```
+Parallel processing + Mutable Processing = Nondeterminism
+```
+
+This is the best (but old) article I found on a matter, applied to Java threads: [Why shared mutable state is the root of all evil](http://henrikeichenhardt.blogspot.com/2013/06/why-shared-mutable-state-is-root-of-all.html
+)
+
+## Fixing naive solution
+
+The only right way to fix parallel processing on a mutable state is to NOT doing it. In other words we need to establish some kind of synchronization and make processing of mutable sequential.
+
+In case of PostgreSQL database we can (ranging from slowest to fastest):
+* use [row level locking](https://www.postgresql.org/docs/9.1/explicit-locking.html#LOCKING-ROWS)
+* use [serialazable transactions](https://www.postgresql.org/docs/9.1/transaction-iso.html#XACT-SERIALIZABLE)
+* implement [optimistic locking](https://en.wikipedia.org/wiki/Optimistic_concurrency_control)
+
+
+One big problem with solutions above can be best described by [Amdahl's Law](https://en.wikipedia.org/wiki/Amdahl%27s_law)
+>  if just 10% of your program cannot be parallelized then with infinite parallel instances you cannot gain more then 10x performance over the single thread performance.
+
+On practice e.g. with 5 parallel threads performance gain will be ~3x (and not 5x). When ever we introduce synchronization in this stereotypical architecture we kill possible speedup which parallel processing can bring.
+
+## Bottom line 
+
+Whenever you have entity in your system which can be modified by more then one actor (e.g. one booking modified by two users):
+* the system will fail to scale with stereotypical architecture
+* with stereotypical architecture it is very easy to do a mistake and introduce nondeterminism into application.
+* race conditions appear much more often than intuition suggests; it's very hard to reproduce them in development and testing
+* you should design application in a way that all processing of mutable state is always synchronized (e.g happens single thread); [Actor model](https://en.wikipedia.org/wiki/Actor_model) can be one solution for this.
+
+## Good Links
+
+* https://www.karlrupp.net/2018/02/42-years-of-microprocessor-trend-data/
+* http://henrikeichenhardt.blogspot.com/2013/06/why-shared-mutable-state-is-root-of-all.html
+* https://en.wikipedia.org/wiki/Amdahl%27s_law
+* https://en.wikipedia.org/wiki/Birthday_problem
+* https://www.postgresql.org/docs/current/transaction-iso.html#XACT-READ-COMMITTED
+* https://en.wikipedia.org/wiki/Actor_model

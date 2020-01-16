@@ -2,13 +2,13 @@
 
 ## Why everyone do parallel processing now?
 
-Despite the Moore law (which still works) processor clock speed is not changing over the last 15 years. When first mass multicore processors released prominent people [proclaimed](http://www.gotw.ca/publications/concurrency-ddj.htm) a turn toward concurrency in software development.
+You may have noticed that processor clock speed is not changing over the last 15 years. When first mass multicore processors released prominent people [proclaimed](http://www.gotw.ca/publications/concurrency-ddj.htm) a turn toward concurrency in software development.
 
 <img src="./cpu-perfomance.png" />
 
 Single thread performance did improve (literally) 10x since then. But every modern software development team now will use parallel processing as the main weapon against throughput and latency issues.
 
-This article is about common scenarios in service-oriented software when parallel processing does not bring performance gains to application.
+This article is about common scenarios in service-oriented applications when parallel processing does not bring performance gains.
 
 ## The setting 
 
@@ -26,13 +26,48 @@ Our goal is to implement the following business requirements:
 * bookings can be `canceled` after it was `accepted`
 * bookings cannot be `accepted` after it was `canceled`
 
-## Naive solution
+## Naive (stereotypical) solution
 
 Driver app checks if booking state is `created` and then sends accepts it: 
 * GET request to receive booking state
 * if booking state `created` send `PUT` request to set the state to `accepted`
 
+<table>
+<tr><td>Driver App</td><tr>
+<tr>
+ <td><pre>GET /booking/{id}</pre></td>
+<tr>
+<tr>
+ <td><pre>assert(state == 'created', true)</pre></td>
+<tr>
+<tr>
+ <td><pre>PUT /booking/{id} {"state": "accepted"}</pre></td>
+<tr>
+</table>
+
+
 The immediate problem is: what happens if Passenger App sent cancel request between `GET` and `PUT` in the Driver app. If Booking Service does no special checks, the last `PUT` request will override `canceled` state with `accepted` state. Which breaks our business requirement.
+
+<table>
+<tr><td>Driver App</td><td>Passenger App</td><tr>
+<tr>
+ <td><pre>GET /booking/{id} {"state": "created"}</pre></td>
+ <td><pre>GET /booking/{id} {"state": "created"}</pre></td>
+<tr>
+<tr>
+ <td></td>
+ <td><pre>PUT /booking/{id} {"state": "canceled"}</pre></td>
+<tr>
+<tr>
+ <td><pre>PUT /booking/{id} {"state": "accepted"}</pre></td>
+ <td></td>
+<tr>
+<tr>
+ <td><pre>GET /booking/{id} {"state": "accepted"}</pre></td>
+ <td><pre>GET /booking/{id} {"state": "accepted"}</pre></td>
+<tr>
+</table>
+
 
 The problem which occurs can be classified as as `read-modify-write` race condition. For many engineers, due to [Birthday Paradox](https://en.wikipedia.org/wiki/Birthday_problem) it can none intuitive how often this race condition will actually happen.
 
@@ -52,9 +87,38 @@ Now let's move our booking state validation from Driver App to booking service. 
 However, when at the same time cancellation request will hit another instance of Booking Service, we will end up with the same `read-modify-write` race condition.
 
 The following solution evolution will depend on database application is using. In the case of PostgreSQL it may look like this:
-* wrap queries with a transaction: won't work because PostgreSQL default transaction is [Read Committed](https://www.postgresql.org/docs/current/transaction-iso.html#XACT-READ-COMMITTED)
+* wrap queries with a transaction
+
+It won't work either because PostgreSQL default transaction is [Read Committed](https://www.postgresql.org/docs/current/transaction-iso.html#XACT-READ-COMMITTED)
 
 > note that two successive SELECT commands can see different data, even though they are within a single transaction if other transactions commit changes after the first SELECT starts and before the second SELECT starts.
+
+<table>
+<tr><td>Instance 1</td><td>Instance 2</td><tr>
+<tr>
+ <td><pre>BEGIN</pre></td>
+ <td><pre>BEGIN</pre></td>
+<tr>
+<tr>
+ <td><pre>SELECT * FROM bookings WHERE id=1</pre></td>
+ <td><pre>SELECT * FROM bookings WHERE id=1</pre></td>
+<tr>
+<tr>
+ <td></td>
+ <td><pre>UPDATE bookings SET state='canceled' WHERE id=1</pre></td>
+<tr>
+<tr>
+ <td><pre>UPDATE bookings SET state='accepted' WHERE id=1</pre></td>
+ <td></td>
+<tr>
+<tr>
+ <td><pre>COMMIT</pre></td>
+ <td><pre>COMMIT</pre></td>
+<tr>
+</table>
+
+The result will be still `accepted` and not `canceled`
+
 
 ## Root of all evil
 
@@ -91,16 +155,20 @@ On practice e.g. with 5 parallel threads performance gain will be ~3x (and not 5
 ## Bottom line 
 
 If you have an entity in your system which can be modified by more then one actor (e.g. one booking modified by two users):
-* the system will fail to scale with stereotypical architecture
-* with stereotypical architecture it is very easy to mistake and introduce non-determinism into the application.
-* race conditions appear much more often than intuition suggests; it's very hard to reproduce them in development and testing
-* you should design application in a way that all processing of mutable state is always synchronized (e.g happens single thread); [Actor model](https://en.wikipedia.org/wiki/Actor_model) can be one solution for this.
+* within stereotypical architecture it is very easy to mistake and introduce non-determinism (e.g race conditions into the application
+* race conditions appear much more often than intuition suggests ([Birthday Paradox](https://en.wikipedia.org/wiki/Birthday_problem)); it's very hard to reproduce them in development and testing
+* you should design application in a way that all processing of mutable state is always synchronized (e.g happens single thread)
+* the stereotypical architecture will fail to scale
+
+If you want to make your system scaleable you need to look towards distributed locking/sharding (like [this example with Apache Kafka](https://danlebrero.com/2018/04/09/kafka-distributed-coordination-actor-model/)) or more sophisticated Actor Model
 
 ## Good Links
 
-* https://www.karlrupp.net/2018/02/42-years-of-microprocessor-trend-data/
-* http://henrikeichenhardt.blogspot.com/2013/06/why-shared-mutable-state-is-root-of-all.html
-* https://en.wikipedia.org/wiki/Amdahl%27s_law
-* https://en.wikipedia.org/wiki/Birthday_problem
-* https://www.postgresql.org/docs/current/transaction-iso.html#XACT-READ-COMMITTED
-* https://en.wikipedia.org/wiki/Actor_model
+* 42 Years of Microprocessor Trend Data https://www.karlrupp.net/2018/02/42-years-of-microprocessor-trend-data/
+* Why shared mutable state is the root of all evil http://henrikeichenhardt.blogspot.com/2013/06/why-shared-mutable-state-is-root-of-all.html
+* Amdahl's law https://en.wikipedia.org/wiki/Amdahl%27s_law
+* Birthday problem https://en.wikipedia.org/wiki/Birthday_problem
+* Transaction Isolation in PostgreSQL https://www.postgresql.org/docs/current/transaction-iso.html
+* PostgreSQL anti-patterns: read-modify-write cycles https://www.2ndquadrant.com/en/blog/postgresql-anti-patterns-read-modify-write-cycles/
+* Kafka, distributed coordination https://danlebrero.com/2018/04/09/kafka-distributed-coordination-actor-model/
+

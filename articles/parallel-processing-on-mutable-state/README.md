@@ -89,7 +89,7 @@ However, when at the same time cancellation request will hit another instance of
 The following solution evolution will depend on database application is using. In the case of PostgreSQL it may look like this:
 * wrap queries with a transaction
 
-It won't work either because PostgreSQL default transaction is [Read Committed](https://www.postgresql.org/docs/current/transaction-iso.html#XACT-READ-COMMITTED)
+It won't work either because PostgreSQL default transaction isolation level is [Read Committed](https://www.postgresql.org/docs/current/transaction-iso.html#XACT-READ-COMMITTED)
 
 > note that two successive SELECT commands can see different data, even though they are within a single transaction if other transactions commit changes after the first SELECT starts and before the second SELECT starts.
 

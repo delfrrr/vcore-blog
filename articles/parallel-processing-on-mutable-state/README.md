@@ -2,7 +2,7 @@
 
 ## Why everyone do parallel processing now?
 
-You may have noticed that processor clock speed is not changing over the last 15 years. When first mass multicore processors released prominent people [proclaimed](http://www.gotw.ca/publications/concurrency-ddj.htm) a turn toward concurrency in software development.
+You may have noticed that processor clock speed is not changing over the last 15 years. When first mass multicore processors released prominent engineers [proclaimed](http://www.gotw.ca/publications/concurrency-ddj.htm) a turn toward concurrency in software development.
 
 <img src="./cpu-perfomance.png" />
 
@@ -12,13 +12,13 @@ This article is about common scenarios in service-oriented applications when par
 
 ## The setting 
 
-Consider this naive architecture of Uber-like ( [ride-hailing](https://en.wikipedia.org/wiki/Peer-to-peer_ridesharing) ) application.
+Consider this simple of Uber-like ([ride-hailing](https://en.wikipedia.org/wiki/Peer-to-peer_ridesharing)) booking service scenario.
 
 <img src="./booking-app.png" />
 
-* Booking Service is simple [CRUD](https://en.wikipedia.org/wiki/Create,_read,_update_and_delete) API which allows us to create and change the state of booking. Booking states are `created`, `accepted`, `canceled` and `completed`
-* Passenger app allows us to create and cancel a booking. 
-* Driver app allows the driver to accept and complete bookings.
+* Booking Service is simple [CRUD](https://en.wikipedia.org/wiki/Create,_read,_update_and_delete) API which allows creating and changing the state of booking. Booking states are `created`, `accepted`, `canceled` and `completed`
+* Passenger app allows us to create and cancel a booking
+* Driver app allows the driver to accept and complete bookings
 
 ## The goal
 
@@ -26,11 +26,9 @@ Our goal is to implement the following business requirements:
 * bookings can be `canceled` after it was `accepted`
 * bookings cannot be `accepted` after it was `canceled`
 
-## Naive (stereotypical) solution
+## Naive solution
 
-Driver app checks if booking state is `created` and then sends accepts it: 
-* GET request to receive booking state
-* if booking state `created` send `PUT` request to set the state to `accepted`
+Driver app checks if booking state is `created` before sending accepting request: 
 
 <table>
 <tr><td>Driver App</td><tr>
@@ -46,7 +44,7 @@ Driver app checks if booking state is `created` and then sends accepts it:
 </table>
 
 
-The immediate problem is: what happens if Passenger App sent cancel request between `GET` and `PUT` in the Driver app. If Booking Service does no special checks, the last `PUT` request will override `canceled` state with `accepted` state. Which breaks our business requirement.
+What will happen if Passenger App send cancel request between `GET` and `PUT` in the Driver app:
 
 <table>
 <tr><td>Driver App</td><td>Passenger App</td><tr>
@@ -68,10 +66,14 @@ The immediate problem is: what happens if Passenger App sent cancel request betw
 <tr>
 </table>
 
+If Booking Service does no special checks, the last `PUT` request will override `canceled` state with `accepted` state. Which breaks our business requirement.
 
-The problem which occurs can be classified as as `read-modify-write` race condition. For many engineers, due to [Birthday Paradox](https://en.wikipedia.org/wiki/Birthday_problem) it can none intuitive how often this race condition will actually happen.
 
-## Evolution of naive solution
+The problem which occurs here can be classified as `read-modify-write` race condition.
+
+Due to [Birthday Paradox](https://en.wikipedia.org/wiki/Birthday_problem) for many engineers, it is not intuitive how often this race condition may happen.
+
+## Evolution of naive solution into stereotypical
 
 The next obvious evolution of the app would be validating the previous state inside the Booking Service. Let's consider the following stereotypical architecture for booking service:
 
@@ -80,18 +82,18 @@ The next obvious evolution of the app would be validating the previous state ins
 * for purposes of scalability and availability booking service running multiple instances.
 * all instances share a single database
 
-Now let's move our booking state validation from Driver App to booking service. When `PUT` request with state updates processed:
-* booking service query database for the current state
+Now let's move our booking state validation from Driver App to booking service. When booking update processed:
+* query database for the current booking state
 * if a booking state is still `created`, update it
+* to make sure that booking state is not changed during the update process by the other instance, make previous two requests within one transaction (depends on database type)
 
-However, when at the same time cancellation request will hit another instance of Booking Service, we will end up with the same `read-modify-write` race condition.
+In the case of SQL database it may look like this:
 
-The following solution evolution will depend on database application is using. In the case of PostgreSQL it may look like this:
-* wrap queries with a transaction
-
-It won't work either because PostgreSQL default transaction isolation level is [Read Committed](https://www.postgresql.org/docs/current/transaction-iso.html#XACT-READ-COMMITTED)
+Unfortunate this solution will likely not work. Default transaction isolation levels vary from database to database. For example in PostgreSQL default transaction isolation level is [Read Committed](https://www.postgresql.org/docs/current/transaction-iso.html#XACT-READ-COMMITTED)
 
 > note that two successive SELECT commands can see different data, even though they are within a single transaction if other transactions commit changes after the first SELECT starts and before the second SELECT starts.
+
+Which means we still may end up with the same `read-modify-write` race condition
 
 <table>
 <tr><td>Instance 1</td><td>Instance 2</td><tr>
@@ -117,8 +119,7 @@ It won't work either because PostgreSQL default transaction isolation level is [
 <tr>
 </table>
 
-The result will be still `accepted` and not `canceled`
-
+Final state will be `accepted` and not `canceled`
 
 ## Root of all evil
 
@@ -160,7 +161,7 @@ If you have an entity in your system which can be modified by more then one acto
 * you should design application in a way that all processing of mutable state is always synchronized (e.g happens single thread)
 * the stereotypical architecture will fail to scale
 
-If you want to make your system scaleable you need to look towards distributed locking/sharding (like [this example with Apache Kafka](https://danlebrero.com/2018/04/09/kafka-distributed-coordination-actor-model/)) or more sophisticated Actor Model
+If you want to make your system scalable you need to look towards distributed locking/sharding (like [this example with Apache Kafka](https://danlebrero.com/2018/04/09/kafka-distributed-coordination-actor-model/)) or more sophisticated Actor Model
 
 ## Good Links
 

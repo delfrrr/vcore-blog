@@ -32,9 +32,9 @@ Draft backlog for articles and who is working on them:
 
 **Stale states challenges:**
 
-* distributed transactions
+* distributed transactions ( @PSCAFFC )
 * command query separation ( @DABBASS )
-* eventual consistency
+* eventual consistency ( @PSCAFFC )
 * unidirectional data flow
 * event sourcing
 

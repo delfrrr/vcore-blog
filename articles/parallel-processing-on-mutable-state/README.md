@@ -156,12 +156,12 @@ On practice e.g. with 5 parallel threads performance gain will be ~3x (and not 5
 ## Bottom line 
 
 If you have an entity in your system which can be modified by more then one actor (e.g. one booking modified by two users):
-* within stereotypical architecture it is very easy to mistake and introduce non-determinism (e.g race conditions into the application
+* within stereotypical architecture it is very easy to mistake and introduce non-determinism (e.g race conditions)
 * race conditions appear much more often than intuition suggests ([Birthday Paradox](https://en.wikipedia.org/wiki/Birthday_problem)); it's very hard to reproduce them in development and testing
 * you should design application in a way that all processing of mutable state is always synchronized (e.g happens single thread)
-* the stereotypical architecture will fail to scale
+* the stereotypical architecture will fail to scale 
 
-If you want to make your system scalable you need to look towards distributed locking/sharding (like [this example with Apache Kafka](https://danlebrero.com/2018/04/09/kafka-distributed-coordination-actor-model/)) or more sophisticated Actor Model
+You cannot parallelize processing of single entity, but you do can process different entities in parallel. It can be achieved with distributed locking and sharding like in [this example with Apache Kafka](https://danlebrero.com/2018/04/09/kafka-distributed-coordination-actor-model/). For more generic solution you should look towards implementation's of [Actor Model](https://en.wikipedia.org/wiki/Actor_model)
 
 ## Good Links
 
